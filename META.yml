@@ -21,9 +21,12 @@ module_name: Text::ClearSilver
 name: Text-ClearSilver
 no_index:
   directory:
+    - cs
     - example
     - inc
+    - patch
     - t
+    - tool
     - xt
 requires:
   XSLoader: 0.1
@@ -31,4 +34,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/Craftworks/Text-ClearSilver.git
-version: 0.10.5.0
+version: 0.10.5.1
