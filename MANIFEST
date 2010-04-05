@@ -1,4 +1,6 @@
 benchmark/cs_ht.pl
+benchmark/cs_mobasif.pl
+benchmark/cs_tt_mt_ht.pl
 benchmark/data/var.hdf
 benchmark/data/var.pl
 benchmark/data_test.pl
@@ -8,6 +10,8 @@ benchmark/simple.pl
 benchmark/template/index.cs
 benchmark/template/simple.cs
 benchmark/template/simple.ht
+benchmark/template/simple.mst
+benchmark/utf8.pl
 Changes
 cs/acconfig.h
 cs/aclocal.m4
@@ -423,8 +427,12 @@ cs/util/wdb.c
 cs/util/wdb.h
 cs/util/wildmat.c
 cs/util/wildmat.h
+example/dbi.pl
+example/escape.pl
 example/hello.pl
 example/hello.tcs
+example/iter.pl
+example/macro.pl
 inc/Module/Install.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
@@ -435,6 +443,9 @@ inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/ClearSilver.pm
 lib/Text/ClearSilver/Compat.pm
+lib/Text/ClearSilver/FunctionSet.pm
+lib/Text/ClearSilver/FunctionSet/html.pm
+lib/Text/ClearSilver/FunctionSet/string.pm
 Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
@@ -449,10 +460,12 @@ t/04_cs_has_a_hdf.t
 t/05_process.t
 t/06_compat.t
 t/07_funcs.t
-t/08_utf8.t
+t/08_function_set.t
+t/09_utf8.t
 t/data/basic.gold
 t/data/basic.hdf
 t/data/basic.tcs
+t/data/camel.tcs
 Text-ClearSilver.h
 tool/build_cs.pl
 tool/get_cs.pl

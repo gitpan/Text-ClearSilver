@@ -4,8 +4,8 @@ use 5.008_001;
 use strict;
 
 
-#use version(); our $VERSION = version->new('0.10.5.1');
-our $VERSION =                              '0.10.5.1'; # workaround ShipIt 0.55
+#use version(); our $VERSION = version->new('0.10.5.2');
+our $VERSION =                              '0.10.5.2'; # workaround ShipIt 0.55
 #                                            ^^^^^^      ClearSilver core version
 #                                                  ^^    Text::ClearSilver version
 
@@ -22,7 +22,7 @@ Text::ClearSilver - Perl interface to the ClearSilver template engine
 
 =head1 VERSION
 
-This document describes Text::ClearSilver version v0.10.5.0.
+This document describes Text::ClearSilver version v0.10.5.1.
 
 =head1 SYNOPSIS
 
@@ -36,16 +36,22 @@ This document describes Text::ClearSilver version v0.10.5.0.
         # extended configuratin
         load_path => [qw(/path/to/template)],
         dataset   => { common_foo => 'value' },
+        functions => [qw(string html)],
     );
 
-    $cs->register_function( lcfirst => sub{ lcfirst $_[0] } );
+    $cs->register_function( ucfirst => sub{ ucfirst $_[0] } );
 
     my %vars = (
         foo => 'bar',         # as var:foo
         baz => { qux => 42 }, # as var:baz.qux
     );
 
-    $cs->process(\q{<?cs var:lcfirst(foo) ?>}, \%vars); # => Bar
+    $cs->process(\q{<?cs var:ucfirst(foo) ?>}, \%vars); # => Bar
+
+    # with encodings
+    $cs->process(\q{<?cs var:foo ?>}, \%vars, \my $out,
+        encoding => 'utf8', # may be 'utf8' or 'bytes'
+    );
 
 =head1 DESCRIPTION
 
@@ -61,19 +67,19 @@ Creates a Text::ClearSilver processor.
 
 Configuration parameters may be:
 
-=over 4
+=over
 
 =item C<< VarEscapeMode => ( 'none' | 'html' | 'js' | 'url' ) >>
 
-Sets variable escaping mode. If it is not C<none>, template variables will be
-automatically escaped. Default to C<none>.
+Sets the default variable escaping mode. If it is not C<none>, template variables
+will be automatically escaped. Default to C<none>.
 
 This is ClearSilver core feature, and a shortcut for
 C<< dataset => { Config => VarEscapeMode => ... } >>.
 
 =item C<< TagStart => $str >>
 
-Sets ClearSilver tag. Default to C<cs>.
+Sets the ClearSilver starting tag. Default to C<cs>.
 
 This is ClearSilver core feature, and a shortcut for
 C<< dataset => { Config => TagStart => ... } >>.
@@ -90,6 +96,17 @@ Sets a dataset which is used in common.
 
 I<$hdf_source> may be references to data or HDF string.
 
+=item C<< functions => \@sets >>
+
+Installs sets of functions.
+
+Currently B<string> (for C<substr>, C<sprintf>, C<lc>, C<uc>, C<lcfirst>,
+C<ucfirst> and C<trim>) and B<html> (for C<nl2br>) are supported.
+
+=item C<< encoding => 'utf8' | 'bytes' >>
+
+Specifies the encoding. Note that C<utf8> works as the C<use utf8> pragma.
+
 =back
 
 =head3 C<< $tcs->dataset :HDF >>
@@ -100,7 +117,7 @@ Returns the dataset that the processor uses in common.
 
 Registers a named function in the TCS processor.
 
-If you set the number of arguments E<gt>= 0, it will be checked at parsing
+If you set the number of arguments C<< >= 0 >>, it will be checked at parsing
 time, rather than runtime.
 
 Note that Text::ClearSilver defines some builtin functions,
@@ -108,7 +125,7 @@ and you cannot re-define them.
 
 Builtin functions are as follows:
 
-=over 4
+=over
 
 =item C<subcount(var)>
 
@@ -155,11 +172,6 @@ otherwise returns -1.
 
 Returns the length of the string expression.
 
-=item C<_(expr)>
-
-Only available if the system supports gettext(3), returns the translated
-version of the string expression as returned by gettext().
-
 =item C<html_escape(expr)>
 
 Tries HTML escapes to the string expression. This converts characters such as
@@ -177,15 +189,14 @@ Tries JavaScript escapes to the string expression into valid data for placement
 into a JavaScript string. This converts characters such as E<quot>, ', and E<92> into their
 JavaScript string safe equivalents E<92>E<quot>,  E<92>', and  E<92>E<92>.
 
-=item C<sprintf(fmt, ...)>
+=item C<text_html(expr)>
 
-Returns a string formatted by Perl builtin C<sprintf> function.
+Returns an HTML fragment formatted from a plain text.
 
-For example:
+=item C<strip_html(expr)>
 
-    <?cs var:sprintf("%2$s %1$s", "foo", "bar") ?> # => "bar foo"
-
-See L<perlfunc/sprintf> for details.
+Returns a plain text from an HTML text, removing HTML tags and converting
+entities into plain characters.
 
 =back
 
@@ -202,7 +213,7 @@ C<< VarEscapeMode => 'html' >> changes the escaping mode temporally.
 
 =head3 C<< $tcs->clear_cache :HASH >>
 
-Clears the global file cache, and returns the old cache.
+Clears the global file cache, and returns the old one.
 
 =head2 The Text::ClearSilver::HDF class
 
@@ -216,7 +227,7 @@ may be a reference to data structure or an HDF string.
 
 Notes:
 
-=over 4
+=over
 
 =item *
 
@@ -354,7 +365,7 @@ Here are ClearSilver keywords.
 
 See L<http://www.clearsilver.net/docs/man_templates.hdf> for details.
 
-=over 4
+=over
 
 =item C<name>
 
@@ -396,6 +407,86 @@ See L<http://www.clearsilver.net/docs/man_templates.hdf> for details.
 
 =back
 
+=head2 Examples
+
+=head3 Loops
+
+Given a dataset:
+
+    my %vars = (
+        Data => [qw(foo bar baz)],
+    );
+
+and a template:
+
+    <?cs each:item = Data ?>
+    <?cs if:first(item) ?>first<?cs /if ?>
+    <?cs var:name(item) ?>: <?cs var:item(name) ?>
+    <?cs if:last(item) ?>last<?cs /if ?>
+    <?cs /each ?>
+
+makes:
+
+    first
+    0: foo
+    1: bar
+    2: baz
+    last
+
+with some white spaces.
+
+=head3 Macros
+
+Given a template:
+
+    <?cs def:add(x, y) ?>[<?cs var:#x+#y ?>]<?cs /def ?>
+    <?cs def:cat(x, y) ?>[<?cs var:x+y ?>]<?cs /def?>
+    10 + 20 = <?cs call add(10, 20) ?> (as number)
+    15 + 25 = <?cs call cat(15, 25) ?> (as string)
+
+makes:
+
+    10 + 20 = 30 (as number)
+    15 + 25 = 1525 (as string)
+
+with some white spaces.
+
+=head3 Escapes
+
+Given a dataset:
+
+    my %vars = (
+        uri => q{<a href="http://example.com">example.com</a>},
+    );
+
+and a template:
+
+    escape: "none":
+    <?cs escape: "none" ?><?cs var:uri ?><?cs /escape ?>
+
+    escape: "html":
+    <?cs escape: "html" ?><?cs var:uri ?><?cs /escape ?>
+
+    escape: "js":
+    <?cs escape: "js" ?><?cs var:uri ?><?cs /escape ?>
+
+    escape: "url":
+    <?cs escape: "url" ?><?cs var:uri ?><?cs /escape ?>
+
+makes:
+
+    escape: "none":
+    <a href="http://example.com">example.com</a>
+
+    escape: "html":
+    &lt;a href=&quot;http://example.com&quot;&gt;example.com&lt;/a&gt;
+
+    escape: "js":
+    \x3Ca href=\x22http:\x2F\x2Fexample.com\x22\x3Eexample.com\x3C\x2Fa\x3E
+
+    escape: "url":
+    %3Ca+href%3D%22http%3A%2F%2Fexample.com%22%3Eexample.com%3C%2Fa%3E
+
 =head1 DEPENDENCIES
 
 Perl 5.8.1 or later, and a C compiler.
@@ -427,6 +518,7 @@ Goro Fuji (gfx) E<lt>gfuji(at)cpan.orgE<gt>
 The ClearSilver template engine is developed by Neotonic Software Corp,
 and Copyright (c) 2003 Brandon Long.
 
+This distribution includes the ClearSilver distribution.
 See L<http://www.clearsilver.net/license.hdf> for ClearSilver Software License.
 
 =head1 LICENSE AND COPYRIGHT

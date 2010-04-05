@@ -32,7 +32,10 @@ my $cs_dir = 'cs';
 
 unless(grep { $_ eq '--no-build-cs' } @ARGV){
     system $^X, 'tool/get_cs.pl',   $cs_dir if not -e $cs_dir;
-    system $^X, 'tool/build_cs.pl', $cs_dir;
+    if(system($^X, 'tool/build_cs.pl', $cs_dir) != 0){
+        warn "Cannot build clearsilver, stopped";
+        exit 0;
+    }
 }
 
 cc_src_paths qw(xs);
@@ -53,9 +56,11 @@ auto_set_repository() if -d '.git';
 
 no_index directory => $cs_dir, qw(tool patch);
 
+clean_files "$cs_dir/*/*$Config{_o}";
+
 clean_files qw(
     Text-ClearSilver-* *.stackdump
-    *.gcda *.gcno *.gcov
+    xs/*.gcda xs/*.gcno xs/*.gcov
     nytprof *.out
     cover_db
 );

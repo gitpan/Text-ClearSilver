@@ -13,8 +13,26 @@
 
 #include "ppport.h"
 
-/* Need raw malloc() that must be what ClearSilver uses */
+#ifndef LIKELY
+#if defined(__GNUC__)
+#define HAS_BUILTIN_EXPECT
+#endif
+
+/* stolen from perl.h, 5.12.0 */
+#ifdef HAS_BUILTIN_EXPECT
+#  define EXPECT(expr,val)                  __builtin_expect(expr,val)
+#else
+#  define EXPECT(expr,val)                  (expr)
+#endif
+
+#define LIKELY(cond)                        EXPECT(cond, 1)
+#define UNLIKELY(cond)                      EXPECT(cond, 0)
+#endif /* ifndef LIKELY */
+
+/* Need raw malloc(3) that must be what ClearSilver uses */
 #undef malloc
+#undef strdup
+#undef strndup
 
 #include "ClearSilver.h"
 
@@ -29,8 +47,8 @@ typedef CSPARSE* Text__ClearSilver__CS;
 #define cs_DESTROY(p)  cs_destroy(&(p))
 
 #define CHECK_ERR(e) STMT_START{ \
-        NEOERR* check_error_value = (e); \
-        if(check_error_value != STATUS_OK) tcs_throw_error(aTHX_ check_error_value); \
+        NEOERR* const check_error_value = (e); \
+        if(UNLIKELY(check_error_value != STATUS_OK)) tcs_throw_error(aTHX_ check_error_value); \
     }STMT_END
 
 void
@@ -50,7 +68,7 @@ tcs_parse_sv(pTHX_ CSPARSE* const parse, SV* const sv);
 HDF*
 tcs_new_hdf(pTHX_ SV* const sv);
 void
-tcs_hdf_add(pTHX_ HDF* const hdf, SV* const sv);
+tcs_hdf_add(pTHX_ HDF* const hdf, SV* const sv, bool const utf8);
 
 
 /* CS */
@@ -67,6 +85,9 @@ typedef struct {
 
     HV* file_cache;
     const char* input_layer;
+    bool utf8;
+
+    bool function_set_is_loaded;
 } my_cxt_t;
 
 my_cxt_t*

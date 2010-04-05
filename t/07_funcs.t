@@ -2,7 +2,6 @@
 
 use strict;
 use Test::More;
-use SelectSaver;
 
 use Text::ClearSilver;
 use Carp ();
@@ -31,16 +30,17 @@ foreach (1 .. 2) {
     is $out, 44;
 
     $out = '';
-    $tcs->process(\'<?cs var:sprintf("%1$d %2$d", #10, #20) ?>', {}, \$out);
-    is $out, '10 20', 'sprintf';
-
-    $out = '';
     $tcs->process(\'<?cs var:take_node(Foo) ?>', { Foo => { bar => 42 } }, \$out);
     is $out, 42, 'take HDF node';
 
     $out = '';
-    $tcs->process(\'<?cs var:sprintf("%2$d %1$d", #10, #20) ?>', {}, \$out);
-    is $out, '20 10', 'builtin sprintf';
+    $tcs->process(\'<?cs var:lc(add(#10, #20)) ?>', {}, \$out);
+    is $out, 30, 'f(g(x))';
+
+    $out = '';
+    $tcs->process(\'<?cs var:lc(lc("FOO")) ?>', {}, \$out);
+    is $out, "foo", 'f(g(x))';
+
 
     eval {
         $out = '';
@@ -50,11 +50,16 @@ foreach (1 .. 2) {
     is $out, '';
 
     eval {
-        $out = '';
-        $tcs->process(\'<?cs var:sprintf() ?>', {}, \$out);
+        $tcs->register_function(_ => sub {});
+        $tcs->process(\'', {}, \$out);
     };
-    like $@, qr/Too few arguments for sprintf/;
-    is $out, '';
+    is $@, '', "_() is not registered";
+
+    eval {
+        $tcs->register_function(len => sub{});
+        $tcs->process(\'', {}, \$out);
+    };
+    like $@, qr/\b DuplicateError \b/xms, 'Cannot redefine builtins';
 }
 
 done_testing;

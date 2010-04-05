@@ -58,22 +58,19 @@ tcs_fileload(void* vcsparse, HDF* const hdf, const char* filename, char** const 
         SV** const svp = hv_fetch(MY_CXT.file_cache, filename, filename_len, FALSE);
 
         if(svp){
-            SV* const stat_buf = AvARRAY(SvRV(*svp))[0];
-            SV* const file_buf = AvARRAY(SvRV(*svp))[1];
-            Stat_t* stp_cache;
+            SV* const mtime_cache    = AvARRAY(SvRV(*svp))[0];
+            SV* const contents_cache = AvARRAY(SvRV(*svp))[1];
 
             if(PerlLIO_stat(filename, &st) < 0) {
                 return nerr_raise(NERR_IO, "Failed to stat(%s): %s", filename, Strerror(errno));
             }
             stat_ok = TRUE;
 
-            assert(SvCUR(stat_buf) == sizeof(Stat_t));
-            stp_cache = (Stat_t*)SvPVX(stat_buf);
-            if(st.st_size == stp_cache->st_size && st.st_mtime == stp_cache->st_mtime) {
-                assert(SvCUR(file_buf) == st.st_size);
-
+            assert(SvIOK(mtime_cache));
+            assert(SvPOK(contents_cache));
+            if(st.st_size == SvCUR(contents_cache) && st.st_mtime == SvIVX(mtime_cache)) {
                 *contents = (char*)malloc(st.st_size + extra_bytes);
-                Copy(SvPVX(file_buf), *contents, st.st_size + 1, char);
+                Copy(SvPVX(contents_cache), *contents, st.st_size + 1, char);
                 return STATUS_OK;
             }
         }
@@ -116,9 +113,9 @@ tcs_fileload(void* vcsparse, HDF* const hdf, const char* filename, char** const 
         Copy(SvPVX(file_buf), *contents, read_bytes + 1, char);
 
         if(MY_CXT.file_cache){
-            SV* cache_entry[2];
+            SV* cache_entry[2]; /* mtime, contents */
 
-            cache_entry[0] = newSVpvn((const char*)&st, sizeof(st));
+            cache_entry[0] = newSViv(st.st_mtime);
             cache_entry[1] = SvREFCNT_inc_simple_NN(file_buf);
 
             (void)hv_store(MY_CXT.file_cache, filename, filename_len,
@@ -143,7 +140,7 @@ HDF*
 tcs_var_lookup_obj(CSPARSE* parse, const char* name);
 
 static NEOERR*
-tcs_push_args(pTHX_ CSPARSE* const parse, CSARG* args) {
+tcs_push_args(pTHX_ CSPARSE* const parse, CSARG* args, const bool utf8) {
     dSP;
 
     PUSHMARK(SP);
@@ -169,6 +166,9 @@ tcs_push_args(pTHX_ CSPARSE* const parse, CSARG* args) {
         case CS_TYPE_STRING:
             assert(val.s);
             sv_setpv(sv, val.s);
+            if(utf8) {
+                sv_utf8_decode(sv);
+            }
             break;
 
         case CS_TYPE_VAR:
@@ -176,6 +176,9 @@ tcs_push_args(pTHX_ CSPARSE* const parse, CSARG* args) {
             str = tcs_var_lookup(parse, val.s);
             if(str) {
                 sv_setpv(sv, str);
+                if(utf8) {
+                    sv_utf8_decode(sv);
+                }
             }
             else { /* HDF node */
                 HDF* const hdf = tcs_var_lookup_obj(parse, val.s);
@@ -230,7 +233,7 @@ tcs_function_wrapper(CSPARSE* const parse, CS_FUNCTION* const csf, CSARG* const 
     ENTER;
     SAVETMPS;
 
-    err = tcs_push_args(aTHX_ parse, args); /* PUSHMARK & PUSH & PUTBACK */
+    err = tcs_push_args(aTHX_ parse, args, MY_CXT.utf8); /* PUSHMARK & PUSH & PUTBACK */
     if(err != STATUS_OK) {
         err = nerr_pass(err);
         goto cleanup;
@@ -251,7 +254,7 @@ tcs_function_wrapper(CSPARSE* const parse, CS_FUNCTION* const csf, CSARG* const 
         goto cleanup;
     }
 
-    if(!(SvIOK(retval) && PERL_ABS(SvIVX(retval)) <= PERL_LONG_MAX)) {
+    if(!((SvTYPE(retval) & SVf_OK) == SVf_IOK && PERL_ABS(SvIVX(retval)) <= PERL_LONG_MAX)) {
         STRLEN len;
         const char* const pv = SvPV_const(retval, len);
         len++; /* '\0' */
@@ -264,56 +267,6 @@ tcs_function_wrapper(CSPARSE* const parse, CS_FUNCTION* const csf, CSARG* const 
     else { /* SvIOK */
         result->op_type = CS_TYPE_NUM;
         result->n       = (long)SvIVX(retval);
-    }
-
-    cleanup:
-    FREETMPS;
-    LEAVE;
-
-    return err;
-}
-
-static NEOERR*
-tcs_sprintf_function(CSPARSE* const parse, CS_FUNCTION* const csf, CSARG* args, CSARG* const result) {
-    dTHX;
-    NEOERR* err;
-
-    PERL_UNUSED_ARG(csf);
-
-    ENTER;
-    SAVETMPS;
-
-    err = tcs_push_args(aTHX_ parse, args); /* PUSHMARK & PUSH & PUTBACK */
-    if(err != STATUS_OK) {
-        err = nerr_pass(err);
-        goto cleanup;
-    }
-
-    {
-        dSP; dMARK; dORIGMARK;
-        I32 const items  = SP - MARK;
-
-        if(items < 1){
-            err = nerr_raise(NERR_ASSERT, "Too few arguments for sprintf()");
-        }
-        else {
-            SV* const retval = sv_newmortal();
-            STRLEN len;
-            const char* pv;
-
-            do_sprintf(retval, items, MARK + 1);
-
-            pv = SvPV_const(retval, len);
-            len++; /* '\0' */
-
-            result->op_type = CS_TYPE_STRING;
-            result->s       = (char*)malloc(len);
-            result->alloc    = TRUE;
-            Copy(pv, result->s, len, char);
-        }
-
-        SP = ORIGMARK;
-        PUTBACK;
     }
 
     cleanup:
@@ -350,6 +303,27 @@ tcs_throw_error(pTHX_ NEOERR* const err) {
     Perl_croak(aTHX_ "ClearSilver: %"SVf, sv);
 }
 
+
+static CV*
+tcs_sv2cv(pTHX_ SV* const func) {
+    HV* stash; /* unused */
+    GV* gv;    /* unused */
+    CV* const cv = sv_2cv(func, &stash, &gv, 0);
+    if(!cv){
+        croak("Not a CODE reference");
+    }
+    return cv;
+}
+
+static HV*
+tcs_deref_hv(pTHX_ SV* const hvref) {
+    if(!(SvROK(hvref) && SvTYPE(SvRV(hvref)) == SVt_PVHV)) {
+        croak("Not a HASH reference");
+    }
+    return (HV*)SvRV(hvref);
+}
+
+
 static const char*
 tcs_get_class_name(pTHX_ SV* const self) {
     if(SvROK(self) && SvOBJECT(SvRV(self))){
@@ -361,6 +335,77 @@ tcs_get_class_name(pTHX_ SV* const self) {
     }
 }
 
+static bool
+tcs_is_utf8(pTHX_ SV* const tcs) {
+    SV** const svp = hv_fetchs(tcs_deref_hv(aTHX_ tcs), "utf8", FALSE);
+    return svp ? sv_true(*svp) : FALSE;
+}
+
+
+static void
+tcs_register_function(pTHX_ SV* const self, SV* const name, SV* const func, IV const n_args) {
+    SV** const svp = hv_fetchs(tcs_deref_hv(aTHX_ self), "functions", FALSE);
+    HV* hv;
+    SV* pair[2];
+    if(svp) {
+        hv = tcs_deref_hv(aTHX_ *svp);
+    }
+    else {
+        hv = newHV();
+        (void)hv_stores(tcs_deref_hv(aTHX_ self), "functions", newRV_noinc((SV*)hv));
+    }
+
+    pair[0] = newRV_inc((SV*)tcs_sv2cv(aTHX_ func));
+    pair[1] = newSViv(n_args);
+
+    (void)hv_store_ent(hv, name, newRV_noinc((SV*)av_make(2, pair)), 0U);
+}
+static void
+tcs_load_function_set(pTHX_ SV* const self, SV* const val) {
+    dMY_CXT;
+
+    ENTER;
+    SAVETMPS;
+
+    if(!MY_CXT.function_set_is_loaded){
+        require_pv("Text/ClearSilver/FunctionSet.pm");
+        if(sv_true(ERRSV)){
+            croak("ClearSilver: panic: %"SVf, ERRSV);
+        }
+        MY_CXT.function_set_is_loaded = TRUE;
+    }
+
+    SAVESPTR(ERRSV);
+    ERRSV = sv_newmortal();
+    {
+        dSP;
+        HV* set;
+        HE* he;
+
+        PUSHMARK(SP);
+        EXTEND(SP, 2);
+        PUSHs(newSVpvs_flags("Text::ClearSilver::FunctionSet", SVs_TEMP));
+        PUSHs(val);
+        PUTBACK;
+        call_method("load", G_SCALAR | G_EVAL);
+
+        if(sv_true(ERRSV)){
+            croak("ClearSilver: cannot load a function set: %"SVf, ERRSV);
+        }
+
+        SPAGAIN;
+        set = tcs_deref_hv(aTHX_ POPs);
+        PUTBACK;
+
+        hv_iterinit(set);
+        while((he = hv_iternext(set))){
+            tcs_register_function(aTHX_ self, hv_iterkeysv(he), hv_iterval(set, he), -1);
+        }
+    }
+    FREETMPS;
+    LEAVE;
+}
+
 static void
 tcs_set_config(pTHX_ SV* const self, HV* const hv, HDF* const hdf, SV* const key, SV* const val) {
     const char* const keypv = SvPV_nolen_const(key);
@@ -370,18 +415,34 @@ tcs_set_config(pTHX_ SV* const self, HV* const hv, HDF* const hdf, SV* const key
         CHECK_ERR( hdf_set_value(config, keypv, SvPV_nolen_const(val)) );
     }
     else { /* extended config */
-        if(strEQ(keypv, "input_encoding")) {
-            /* TODO */
-            (void)hv_store_ent(hv, key, newSVsv(val), 0U);
+        if(strEQ(keypv, "encoding")) {
+            const char* const valpv = SvPV_nolen_const(val);
+            bool utf8;
+            if(strEQ(valpv, "utf8")){
+                utf8 = TRUE;
+            }
+            else if(strEQ(valpv, "bytes")){
+                utf8 = FALSE;
+            }
+            else {
+                croak("ClearSilver: encoding must be 'utf8' or 'bytes', not '%s'", valpv);
+            }
+            (void)hv_stores(hv, "utf8", newSViv(utf8));
+        }
+        else if(strEQ(keypv, "input_layer")){
+            (void)hv_stores(hv, "input_layer", newSVsv(val));
         }
         else if(strEQ(keypv, "dataset")) {
-            tcs_hdf_add(aTHX_ hdf, val);
+            tcs_hdf_add(aTHX_ hdf, val, tcs_is_utf8(aTHX_ self));
         }
         else if(strEQ(keypv, "load_path")) {
             HDF* loadpaths;
             CHECK_ERR( hdf_get_node(hdf, "hdf.loadpaths", &loadpaths) );
 
-            tcs_hdf_add(aTHX_ loadpaths, val);
+            tcs_hdf_add(aTHX_ loadpaths, val, tcs_is_utf8(aTHX_ self));
+        }
+        else if(strEQ(keypv, "functions")) {
+            tcs_load_function_set(aTHX_ self, val);
         }
         else if(ckWARN(WARN_MISC)) {
             Perl_warner(aTHX_ packWARN(WARN_MISC), "%s: unknown configuration variable '%s'",
@@ -442,25 +503,6 @@ tcs_sv2io(pTHX_ SV* sv, const char* const mode, int const imode, bool* const nee
     }
 }
 
-static CV*
-tcs_sv2cv(pTHX_ SV* const func) {
-    HV* stash; /* unused */
-    GV* gv;    /* unused */
-    CV* const cv = sv_2cv(func, &stash, &gv, 0);
-    if(!cv){
-        croak("Not a CODE reference");
-    }
-    return cv;
-}
-
-static HV*
-tcs_deref_hv(pTHX_ SV* const hvref) {
-    if(!(SvROK(hvref) && SvTYPE(SvRV(hvref)) == SVt_PVHV)) {
-        croak("Not a HASH reference");
-    }
-    return (HV*)SvRV(hvref);
-}
-
 void
 tcs_register_funcs(pTHX_ CSPARSE* const cs, HV* const funcs) {
 
@@ -487,9 +529,6 @@ tcs_register_funcs(pTHX_ CSPARSE* const cs, HV* const funcs) {
         }
     }
 
-    /* TCS specific builtins */
-    CHECK_ERR( cs_register_function(cs, "sprintf", -1, tcs_sprintf_function) );
-
     /* functions from cgi_register_strfuncs() */
     CHECK_ERR( cgi_register_strfuncs(cs) );
 }
@@ -505,6 +544,7 @@ tcs_get_struct_ptr(pTHX_ SV* const arg, const char* const klass,
     return NULL; /* NOT REACHED */
 }
 
+#define register_function(self, name, cb, nargs) tcs_register_function(aTHX_ self, name, cb, nargs)
 
 MODULE = Text::ClearSilver    PACKAGE = Text::ClearSilver
 
@@ -569,24 +609,7 @@ CODE:
 
 void
 register_function(SV* self, SV* name, SV* func, int n_args = -1)
-CODE:
-{
-    SV** const svp = hv_fetchs(tcs_deref_hv(aTHX_ self), "functions", FALSE);
-    HV* hv;
-    SV* pair[2];
-    if(svp) {
-        hv = tcs_deref_hv(aTHX_ *svp);
-    }
-    else {
-        hv = newHV();
-        (void)hv_stores(tcs_deref_hv(aTHX_ self), "functions", newRV_noinc((SV*)hv));
-    }
 
-    pair[0] = newRV_inc((SV*)tcs_sv2cv(aTHX_ func));
-    pair[1] = newSViv(n_args);
-
-    (void)hv_store_ent(hv, name, newRV_noinc((SV*)av_make(2, pair)), 0U);
-}
 
 void
 dataset(SV* self)
@@ -603,6 +626,7 @@ void
 process(SV* self, SV* src, SV* vars, SV* volatile dest = DEFAULT_OUT, ...)
 CODE:
 {
+    dMY_CXT;
     dXCPT;
     CSPARSE*  cs         = NULL;
     HDF*     hdf         = NULL;
@@ -610,6 +634,8 @@ CODE:
     bool need_ofp_close  = FALSE;
     PerlIO* volatile ifp = NULL;
     PerlIO* volatile ofp = NULL;
+    bool save_utf8;
+    const char* save_input_layer;
 
     if(!( SvROK(self) && SvOBJECT(SvRV(self)) )){
         croak("Cannot %s->process as a class method", "Text::ClearSilver");
@@ -618,8 +644,13 @@ CODE:
     SvGETMAGIC(src);
     SvGETMAGIC(dest);
 
+    save_utf8   = MY_CXT.utf8;
+    MY_CXT.utf8 = FALSE;
+
+    save_input_layer   = MY_CXT.input_layer;
+    MY_CXT.input_layer = NULL;
+
     XCPT_TRY_START {
-        dMY_CXT;
         HV* const hv = tcs_deref_hv(aTHX_ self);
         const char* input_layer;
         SV** svp;
@@ -633,7 +664,7 @@ CODE:
             ofp = tcs_sv2io(aTHX_ dest, "w", O_WRONLY|O_CREAT|O_TRUNC, &need_ofp_close);
         }
 
-        tcs_hdf_add(aTHX_ hdf, vars);
+        MY_CXT.utf8 = tcs_is_utf8(aTHX_ self);
 
         svp = NULL;
         if(items > 4){
@@ -641,22 +672,36 @@ CODE:
             sv_2mortal((SV*)local_hv);
             tcs_configure(aTHX_ self, local_hv, hdf, ax + 4, items - 4);
 
+            svp = hv_fetchs(local_hv, "utf8", FALSE);
+            if(svp) {
+                MY_CXT.utf8 = sv_true(*svp);
+            }
+
             svp = hv_fetchs(local_hv, "input_layer", FALSE);
         }
         if(!svp){
             svp = hv_fetchs(hv, "input_layer", FALSE);
         }
-        input_layer = svp ? SvPV_nolen_const(*svp) : NULL;
 
+        if(svp) {
+            input_layer = SvPV_nolen_const(*svp);
+        }
+        else if(MY_CXT.utf8) {
+            input_layer = ":utf8";
+        }
+        else {
+            input_layer = NULL;
+        }
+
+        tcs_hdf_add(aTHX_ hdf, vars, MY_CXT.utf8);
 
         CHECK_ERR( cs_init(&cs, hdf) );
 
-        svp = hv_fetchs(tcs_deref_hv(aTHX_ self), "functions", FALSE);
+        svp = hv_fetchs(hv, "functions", FALSE);
         tcs_register_funcs(aTHX_ cs, svp ? tcs_deref_hv(aTHX_ *svp) : NULL);
 
         cs_register_fileload(cs, cs, tcs_fileload);
 
-        SAVEVPTR(MY_CXT.input_layer);
         MY_CXT.input_layer = input_layer;
 
         /* parse CS template */
@@ -664,7 +709,7 @@ CODE:
             if(SvTYPE(SvRV(src)) > SVt_PVMG){
                 croak("Source must be a scalar reference or a filename, not %"SVf, src);
             }
-            CHECK_ERR(tcs_parse_sv(aTHX_ cs, SvRV(src)));
+            CHECK_ERR( tcs_parse_sv(aTHX_ cs, SvRV(src)) );
         }
         else {
             CHECK_ERR( cs_parse_file(cs, SvPV_nolen_const(src)) );
@@ -672,14 +717,23 @@ CODE:
 
         /* render */
         if(ofp) {
+            if(MY_CXT.utf8 && !PerlIO_isutf8(ofp)) {
+                PerlIO_binmode(aTHX_ ofp, '>', O_TEXT, ":utf8");
+            }
             CHECK_ERR( cs_render(cs, ofp, tcs_output_to_io) );
         }
         else {
             sv_setpvs(SvRV(dest), "");
+            if(MY_CXT.utf8) {
+                SvUTF8_on(SvRV(dest));
+            }
             CHECK_ERR( cs_render(cs, SvRV(dest), tcs_output_to_sv) );
         }
     }
     XCPT_TRY_END
+
+    MY_CXT.utf8        = save_utf8;
+    MY_CXT.input_layer = save_input_layer;
 
     if(need_ifp_close) PerlIO_close(ifp);
     if(need_ofp_close) PerlIO_close(ofp);
