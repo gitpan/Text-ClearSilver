@@ -35,14 +35,26 @@ foreach (1 .. 2){
     $cs->parse_string('<?cs var: foo ?>');
 
     is $cs->render(), 'bar', 'render';
+
+    $hdf = Text::ClearSilver::HDF->new({
+            rows => { widget => { pickup_apps => [1, 2, 3] } },
+            widget => { data => { pickup_apps => { rows => [4, 5, 6]  }} },
+    });
+    is $hdf->get_value("rows.widget.pickup_apps.1"), 2;
+    is $hdf->get_value("widget.data.pickup_apps.rows.1"), 5;
 }
 
-# circular refs
-
-# TODO
 {
-    no warnings 'misc';
+    my $pair = { foo => 'bar' };
+    my @data = ($pair, $pair);
 
+    my $hdf = Text::ClearSilver::HDF->new(\@data);
+
+    is $hdf->get_value("0.foo"), "bar";
+    is $hdf->get_value("1.foo"), "bar";
+}
+
+{
     my $parent = { value => 'PARENT' };
     my $child  = { value => 'CHILD'  };
 
@@ -53,8 +65,6 @@ foreach (1 .. 2){
 
     is $hdf->get_value("0.value"),        "PARENT";
     is $hdf->get_value("0.child.value"),  "CHILD";
-
-    local $TODO = "Cannot deal with cyclic refs";
 
     is $hdf->get_value("1.value"),        "CHILD";
     is $hdf->get_value("1.parent.value"), "PARENT";

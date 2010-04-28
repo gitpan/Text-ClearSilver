@@ -4,8 +4,8 @@ use 5.008_001;
 use strict;
 
 
-#use version(); our $VERSION = version->new('0.10.5.3');
-our $VERSION =                              '0.10.5.3'; # workaround ShipIt 0.55
+#use version(); our $VERSION = version->new('0.10.5.4');
+our $VERSION =                              '0.10.5.4'; # workaround ShipIt 0.55
 #                                            ^^^^^^      ClearSilver core version
 #                                                  ^^    Text::ClearSilver version
 
@@ -22,7 +22,7 @@ Text::ClearSilver - Perl interface to the ClearSilver template engine
 
 =head1 VERSION
 
-This document describes Text::ClearSilver version v0.10.5.3.
+This document describes Text::ClearSilver version v0.10.5.4.
 
 =head1 SYNOPSIS
 
@@ -290,7 +290,7 @@ Sets the value of a named node.
 
 Copies a value from one location in the dataset to another.
 
-=head3 B<< $hdf->set_symlink($src_name, $dest_name) :Void >>
+=head3 B<< $hdf->set_symlink($link_name, $existing_name) :Void >>
 
 Sets a part of the dataset to link to another.
 
